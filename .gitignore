@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Training outputs you don't want tracked
+checkpoints/
+results/
+*.pkl
+*.pt
+
+# MuJoCo / JAX
+*.mjb
+jax_cache/
+
+# Weights & Biases
+wandb/

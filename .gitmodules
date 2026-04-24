@@ -1,0 +1,3 @@
+[submodule "mujoco_playground"]
+	path = mujoco_playground
+	url = https://github.com/mkleszcz11/mujoco_playground
