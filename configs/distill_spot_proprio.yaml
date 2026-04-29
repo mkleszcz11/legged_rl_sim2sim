@@ -1,0 +1,41 @@
+env:
+  name: SpotJoystickRoughTerrain
+  num_envs: 128   # 512 OOMs on 4 GB GPU once JAX compiles the batch-512 teacher trace;
+                  # 128 leaves ~1.5 GB headroom for JIT caches and CUDA graphs
+  seed: 1
+  ctrl_dt: 0.02  # seconds per control step; used for gait-frequency calculation
+
+teacher:
+  # Path relative to project root (unitree_go2_rl/).
+  # find_latest_checkpoint() picks the highest-numbered subdirectory automatically.
+  checkpoint_dir: mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints
+  env_name: SpotJoystickRoughTerrain
+
+student:
+  obs_dim: 69          # state[0:54] + state[66:81]; noisy_feet_pos [54:66] excluded
+  action_dim: 12
+  rnn_type: gru
+  rnn_hidden_dim: 256
+  rnn_num_layers: 1
+  hidden_dims: [128]   # MLP head after GRU
+
+training:
+  device: cuda:0
+  # 7629 iters × 128 envs × 1024 steps ≈ 1B env steps.
+  # Supervised distillation converges 10–30× faster than PPO, so 1B steps vs
+  # the teacher's ~192M PPO steps is a reasonable first full run.
+  # At ~8s/iter on RTX 500: ≈ 17 hours.  Stop early once loss plateaus.
+  max_iterations: 800 # 1000 × 128 × 1024 = 104857600
+  num_steps_per_env: 1024
+  num_mini_batches: 4      # envs split into 4 batches of 128 for the update phase
+  num_learning_epochs: 4   # 4 passes × 4 mini-batches = 16 gradient updates per iteration
+  learning_rate: 1.0e-3
+  grad_clip_norm: 1.0
+  loss_type: mse           # switch to "huber" if student collapses to mean action
+
+logging:
+  project: mjxrl
+  run_name: null           # auto-generated timestamp when null
+  checkpoint_dir: checkpoints/student_spot_proprio
+  log_interval: 50         # print + wandb log every N iterations
+  save_interval: 500       # save checkpoint every N iterations
