@@ -25,7 +25,7 @@ training:
   # Supervised distillation converges 10–30× faster than PPO, so 1B steps vs
   # the teacher's ~192M PPO steps is a reasonable first full run.
   # At ~8s/iter on RTX 500: ≈ 17 hours.  Stop early once loss plateaus.
-  max_iterations: 800 # 1000 × 128 × 1024 = 104857600
+  max_iterations: 800 # 1000 × 128 × 1024 = 104857600 env steps
   num_steps_per_env: 1024
   num_mini_batches: 4      # envs split into 4 batches of 128 for the update phase
   num_learning_epochs: 4   # 4 passes × 4 mini-batches = 16 gradient updates per iteration
