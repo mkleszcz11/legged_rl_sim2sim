@@ -1,6 +1,6 @@
 """M2 evaluation: prove all four M2 done criteria.
 
-Run from repo root (unitree_go2_rl/):
+Run from repo root (legged_rl_sim2sim/):
     python evaluate/m2/eval_metrics.py \\
         --checkpoint_dir mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints \\
         --nodr_checkpoint_dir mujoco_playground/logs/SpotFlatTerrainJoystick-20260427-202132/checkpoints \\

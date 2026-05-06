@@ -141,7 +141,7 @@ def collect_rollout(
     """
     num_steps: int  = cfg["training"]["num_steps_per_env"]
     num_envs:  int  = cfg["env"]["num_envs"]
-    ctrl_dt:   float= cfg["env"]["ctrl_dt"]
+    ctrl_dt:   float = cfg["env"]["ctrl_dt"]
 
     storage = RolloutStorage(
         proprio      = torch.zeros(num_steps, num_envs, cfg["student"]["obs_dim"],    device=device),
@@ -151,7 +151,6 @@ def collect_rollout(
 
     # Gait-frequency tracking: count foot liftoffs via feet_air_time edge detection.
     # feet_air_time == 0  →  foot is in contact;  > 0  →  foot is in the air.
-    # A liftoff occurs when air[t] > 0 and air[t-1] == 0.
     prev_feet_air = torch.zeros(num_envs, 4, device=device)
     swing_counts  = torch.zeros(num_envs,    device=device)
 
@@ -176,7 +175,6 @@ def collect_rollout(
             obs, _reward, done, info = env.step(student_acts)
             storage.dones[t] = done
 
-            # Reset GRU hidden state for environments that just terminated.
             # done[i] == 1 means env i auto-reset; its next obs starts a new episode.
             hidden = hidden * (1.0 - done).view(1, -1, 1)
 
@@ -351,12 +349,12 @@ def main() -> None:
     oracle = load_teacher(checkpoint_dir=teacher_ckpt, env_name=cfg["teacher"]["env_name"])
 
     # ── Student ───────────────────────────────────────────────────────────────
-    s = cfg["student"]
+    student_cfg = cfg["student"]
     student = GRUStudent(
-        obs_dim        = s["obs_dim"],
-        action_dim     = s["action_dim"],
-        rnn_hidden_dim = s["rnn_hidden_dim"],
-        hidden_dims    = s["hidden_dims"],
+        obs_dim        = student_cfg["obs_dim"],
+        action_dim     = student_cfg["action_dim"],
+        rnn_hidden_dim = student_cfg["rnn_hidden_dim"],
+        hidden_dims    = student_cfg["hidden_dims"],
     ).to(device)
     n_params = sum(p.numel() for p in student.parameters())
     print(f"Student parameters: {n_params:,}")

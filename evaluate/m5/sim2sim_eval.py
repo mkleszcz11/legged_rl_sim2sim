@@ -1,24 +1,11 @@
-"""Sim-to-sim evaluation for the M3 student policy (M5 milestone).
+"""Sim-to-sim evaluation for the M3 / M6 student policy.
 
-Deploys the trained Spot student zero-shot on three simulators and reports a
-quantitative gap table.
+Runs the student zero-shot on MJX (training env, vmap batched) and on vanilla
+MuJoCo CPU (finer timestep, more solver iterations) and reports a per-episode
+metric table. Results are keyed on (sim, seed); re-running fills missing rows
+only.
 
-Simulators:
-  mjx        — MJX-JAX (training env; 100 envs vmap'd in parallel)
-  mujoco_cpu — Vanilla MuJoCo CPU (same MJCF; finer timestep + more solver iters)
-  genesis    — Genesis (optional; skipped if not installed or Spot MJCF fails)
-
-Metrics per episode (30 s, fixed 1.0 m/s forward command):
-  tracking_error_mean   — mean |linvel_x - 1.0| over alive steps (m/s)
-  survived              — no fall within 30 s
-  base_height_dev_mean  — mean |base_z - 0.50| over alive steps (m)
-  feet_force_rms        — sqrt(mean ||f_foot||^2) over alive steps × 4 feet (N)
-
-Re-run safety:
-  Results are keyed on (sim, seed).  Re-running adds only the missing rows;
-  already-collected rows are never overwritten.
-
-Run from repo root (unitree_go2_rl/):
+Run from repo root (legged_rl_sim2sim/):
     python evaluate/m5/sim2sim_eval.py
     python evaluate/m5/sim2sim_eval.py --sims mjx mujoco_cpu --num_episodes 5
 

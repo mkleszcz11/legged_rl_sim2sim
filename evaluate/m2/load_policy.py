@@ -41,7 +41,7 @@ _ACTIVATIONS = {
     "sigmoid": jax.nn.sigmoid,
 }
 
-# Default checkpoint paths (relative to repo root unitree_go2_rl/)
+# Default checkpoint paths (relative to repo root legged_rl_sim2sim/)
 DEFAULT_ROUGH_CKPT = (
     "mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints"
 )

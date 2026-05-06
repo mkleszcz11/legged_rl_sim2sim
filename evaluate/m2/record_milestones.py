@@ -3,7 +3,7 @@
 Picks every N-th checkpoint (1-indexed position) plus always the last,
 records selected scenarios for each, and overlays a timestep watermark.
 
-Run from repo root (unitree_go2_rl/):
+Run from repo root (legged_rl_sim2sim/):
     python evaluate/m2/record_milestones.py \\
         --checkpoint_dir /home/marcin/projects/robot_learning/mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints \\
         --every_n 4

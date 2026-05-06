@@ -9,7 +9,7 @@ teacher:
   # Path relative to project root (unitree_go2_rl/).
   # find_latest_checkpoint() picks the highest-numbered subdirectory automatically.
   # checkpoint_dir: logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints
-  checkpoint_dir: logs/SpotJoystickRoughTerrain-20260505-161109/checkpoints
+  checkpoint_dir: logs/SpotJoystickRoughTerrain-20260505-161109/checkpoints # REPLACE WITH YOUR CHECKPOINT PATH
   env_name: SpotJoystickRoughTerrain
 
 student:
@@ -37,6 +37,6 @@ training:
 logging:
   project: mjxrl
   run_name: null           # auto-generated timestamp when null
-  checkpoint_dir: checkpoints/student_spot_proprio_m3
+  checkpoint_dir: checkpoints/student_spot_proprio # REPLACE WITH YOUR STUDENT PATH
   log_interval: 50         # print + wandb log every N iterations
   save_interval: 500       # save checkpoint every N iterations

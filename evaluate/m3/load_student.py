@@ -16,7 +16,7 @@ import torch.nn as nn
 from mujoco_playground import registry
 from mujoco_playground._src.wrapper_torch import RSLRLBraxWrapper
 
-# Default paths relative to repo root (unitree_go2_rl/).
+# Default paths relative to repo root (legged_rl_sim2sim/).
 DEFAULT_STUDENT_CKPT = "checkpoints/student_spot_proprio/student_spot_proprio.pt"
 TEACHER_CKPT_DIR     = "mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints"
 ENV_NAME             = "SpotJoystickRoughTerrain"

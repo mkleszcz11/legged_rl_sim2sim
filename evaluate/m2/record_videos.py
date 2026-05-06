@@ -1,6 +1,6 @@
 """Record 10 predefined-movement videos for the M2 Spot policy.
 
-Run from repo root (unitree_go2_rl/):
+Run from repo root (legged_rl_sim2sim/):
     python evaluate/m2/record_videos.py \
         --checkpoint_dir mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints \
         --output_dir evaluate/m2/results/videos

@@ -16,3 +16,10 @@ jax_cache/
 
 # Weights & Biases
 wandb/
+
+# Videos
+*.mp4**/*.pt
+**/*.pkl
+checkpoints/
+train/actuator_residual/data/*.npz
+**/*.npz

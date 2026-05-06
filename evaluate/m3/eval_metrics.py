@@ -6,7 +6,7 @@ Criteria:
   C3  Gait frequency  in [1.5, 4.0] Hz  healthy trot
   C4  Tracking error   ≤ 0.40 m/s  forward tracking at fixed 1.0 m/s command
 
-Run from repo root (unitree_go2_rl/):
+Run from repo root (legged_rl_sim2sim/):
     python evaluate/m3/eval_metrics.py
     python evaluate/m3/eval_metrics.py --student_checkpoint checkpoints/.../student_spot_proprio_m3.pt
 

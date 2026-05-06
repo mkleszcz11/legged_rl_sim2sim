@@ -3,7 +3,7 @@
 The student (PyTorch GRU) drives the raw Brax env via a Python step loop with
 zero-copy JAX↔torch bridging.  Same 10 scenarios as the M2 teacher recording.
 
-Run from repo root (unitree_go2_rl/):
+Run from repo root (legged_rl_sim2sim/):
     python evaluate/m3/record_videos.py
     python evaluate/m3/record_videos.py --student_checkpoint checkpoints/.../student_spot_proprio_m3.pt
     python evaluate/m3/record_videos.py --scenarios forward_nom.mp4 curve.mp4
