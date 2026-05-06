@@ -81,7 +81,8 @@ def make_env(env_name: str, config_overrides: dict | None = None):
 def load_policy(checkpoint_dir: str | Path, env_name: str,
                 config_overrides: dict | None = None,
                 checkpoint_path: Path | None = None,
-                num_envs: int | None = None):
+                num_envs: int | None = None,
+                env=None):
     """Load a PPO policy from a checkpoint directory.
 
     Mirrors the --play_only path in train_jax_ppo.py:
@@ -91,14 +92,27 @@ def load_policy(checkpoint_dir: str | Path, env_name: str,
 
     Args:
         checkpoint_dir:   Path to the checkpoints/ directory (contains numeric subdirs).
-        env_name:         Environment name registered in mujoco_playground.
-        config_overrides: Optional env config overrides (e.g. episode_length).
+        env_name:         Environment name registered in mujoco_playground. Used to
+                          look up PPO hyperparameters (locomotion_params.brax_ppo_config).
+                          When `env` is also provided, this name is NOT used to construct
+                          the env -- only for the params lookup.
+        config_overrides: Optional env config overrides (e.g. episode_length). Only
+                          applied when `env` is None.
         checkpoint_path:  Specific numeric checkpoint subdir to load. Defaults to latest.
         num_envs:         Override the default PPO num_envs for the JIT compilation.
                           Use a small value (e.g. 1) when loading for inference only to
                           avoid allocating GPU memory for thousands of dummy environments.
                           The returned inference_fn is batch-size agnostic regardless.
+        env:              Pre-built environment to use instead of constructing one from
+                          `env_name`. Required when the env is a custom subclass not in
+                          the registry (e.g. SpotJoystickResidualEnv).
     """
+    if env is not None and config_overrides:
+        raise ValueError(
+            "config_overrides is incompatible with a pre-built `env`; "
+            "apply overrides when constructing the env instead."
+        )
+
     checkpoint_dir = Path(checkpoint_dir)
     ckpt_to_load = Path(checkpoint_path) if checkpoint_path else find_latest_checkpoint(checkpoint_dir)
     net_cfg = read_network_config(checkpoint_dir)
@@ -113,7 +127,8 @@ def load_policy(checkpoint_dir: str | Path, env_name: str,
     print(f"[load_policy] policy_hidden={policy_hidden}, value_hidden={value_hidden}")
     print(f"[load_policy] policy_obs_key={policy_obs_key}, value_obs_key={value_obs_key}")
 
-    env = make_env(env_name, config_overrides=config_overrides)
+    if env is None:
+        env = make_env(env_name, config_overrides=config_overrides)
 
     # PPO hyperparams from the registry defaults for this env
     ppo_params = locomotion_params.brax_ppo_config(env_name, "jax")

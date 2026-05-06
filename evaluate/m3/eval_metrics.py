@@ -8,7 +8,7 @@ Criteria:
 
 Run from repo root (unitree_go2_rl/):
     python evaluate/m3/eval_metrics.py
-    python evaluate/m3/eval_metrics.py --student_checkpoint checkpoints/.../student_spot_proprio.pt
+    python evaluate/m3/eval_metrics.py --student_checkpoint checkpoints/.../student_spot_proprio_m3.pt
 
 Outputs:
     evaluate/m3/results/metrics.json   -- all metric values + pass/fail flags
@@ -232,7 +232,7 @@ def parse_args():
     p.add_argument(
         "--student_checkpoint",
         default=str(_REPO_ROOT / DEFAULT_STUDENT_CKPT),
-        help="Path to student_spot_proprio.pt checkpoint file.",
+        help="Path to student_spot_proprio_m3.pt checkpoint file.",
     )
     p.add_argument(
         "--teacher_checkpoint_dir",
@@ -263,9 +263,11 @@ def main():
 
     print(f"\nLoading student …")
     student = load_student(args.student_checkpoint, device=args.device)
+    print(f"Loaded student from {args.student_checkpoint}")
 
     print(f"\nLoading teacher oracle …")
     oracle = load_teacher(args.teacher_checkpoint_dir, ENV_NAME)
+    print(f"Loaded teacher from {args.teacher_checkpoint_dir}")
 
     print(f"\nBuilding wrapped env ({args.num_envs} envs) …")
     env_wrapped = build_env_wrapper(num_envs=args.num_envs, seed=args.seed)

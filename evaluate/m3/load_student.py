@@ -96,7 +96,34 @@ def build_env_wrapper(
     )
 
 
-def build_env_raw(env_name: str = ENV_NAME):
-    """Raw Brax/JAX env for single-env rendering and fixed-command evaluation."""
+def build_env_raw(env_name: str = ENV_NAME, residual_ckpt: str | None = None):
+    """Raw Brax/JAX env for single-env rendering and fixed-command evaluation.
+
+    If residual_ckpt is provided, build the M4 SpotJoystickResidualEnv with the
+    trained residual injected at every physics substep. This lets the M3 student
+    drive an env whose dynamics approximate accurate-CPU physics WITHOUT any
+    PPO finetune -- a direct test of whether the residual closes the sim2sim
+    gap at inference time.
+    """
     cfg = registry.get_default_config(env_name)
-    return registry.load(env_name, config=cfg)
+
+    if residual_ckpt is None:
+        return registry.load(env_name, config=cfg)
+
+    if env_name != ENV_NAME:
+        raise ValueError(
+            f"Residual injection is only wired up for {ENV_NAME}, got {env_name}."
+        )
+
+    # Lazy import to avoid pulling Flax + torch into every eval script.
+    sys.path.insert(0, str(_REPO_ROOT / "train" / "actuator_residual"))
+    from finetune_teacher import SpotJoystickResidualEnv, port_weights
+
+    params, in_mean, in_std, out_mean, out_std = port_weights(residual_ckpt)
+    print(f"[build_env_raw] residual injected from {residual_ckpt}")
+    return SpotJoystickResidualEnv(
+        config=cfg,
+        residual_params=params,
+        in_mean=in_mean, in_std=in_std,
+        out_mean=out_mean, out_std=out_std,
+    )

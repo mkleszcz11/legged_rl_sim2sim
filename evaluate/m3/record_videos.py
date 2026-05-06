@@ -5,7 +5,7 @@ zero-copy JAX↔torch bridging.  Same 10 scenarios as the M2 teacher recording.
 
 Run from repo root (unitree_go2_rl/):
     python evaluate/m3/record_videos.py
-    python evaluate/m3/record_videos.py --student_checkpoint checkpoints/.../student_spot_proprio.pt
+    python evaluate/m3/record_videos.py --student_checkpoint checkpoints/.../student_spot_proprio_m3.pt
     python evaluate/m3/record_videos.py --scenarios forward_nom.mp4 curve.mp4
 
 Outputs 10 MP4 files in evaluate/m3/results/videos/.
@@ -156,7 +156,7 @@ def parse_args():
     p.add_argument(
         "--student_checkpoint",
         default=str(_REPO_ROOT / DEFAULT_STUDENT_CKPT),
-        help="Path to student_spot_proprio.pt checkpoint file.",
+        help="Path to student_spot_proprio_m3.pt checkpoint file.",
     )
     p.add_argument(
         "--output_dir",
@@ -169,6 +169,12 @@ def parse_args():
         "--scenarios", nargs="*", default=None,
         help="Subset of scenario filenames to record (default: all 10).  "
              "Example: --scenarios forward_nom.mp4 curve.mp4",
+    )
+    p.add_argument(
+        "--residual_ckpt", default=None,
+        help="If set, drive the student through SpotJoystickResidualEnv with this "
+             "M4 residual checkpoint injected at every substep. Inference-only test "
+             "(no PPO finetune) of whether the residual closes the sim2sim gap.",
     )
     return p.parse_args()
 
@@ -189,10 +195,10 @@ def main():
     print("=" * 64)
     # Build env before loading student so JAX/Warp warm up before PyTorch claims GPU.
     print(f"Building raw env ({ENV_NAME}) …")
-    env = build_env_raw()
+    env = build_env_raw(residual_ckpt=args.residual_ckpt)
 
-    env.mj_model.vis.headlight.ambient[:] = [0.4, 0.4, 0.4]
-    env.mj_model.vis.headlight.diffuse[:] = [0.8, 0.8, 0.8]
+    env.mj_model.vis.headlight.ambient[:] = [0.5, 0.5, 0.5]
+    env.mj_model.vis.headlight.diffuse[:] = [0.7, 0.7, 0.7]
     env.mj_model.vis.headlight.active = 1
     # Pre-compile env.step so Warp allocates its collision context once via XLA
     # rather than re-allocating in eager mode on every Python-loop iteration.

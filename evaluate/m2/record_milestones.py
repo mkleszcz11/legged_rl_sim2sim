@@ -5,7 +5,7 @@ records selected scenarios for each, and overlays a timestep watermark.
 
 Run from repo root (unitree_go2_rl/):
     python evaluate/m2/record_milestones.py \\
-        --checkpoint_dir mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints \\
+        --checkpoint_dir /home/marcin/projects/robot_learning/mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints \\
         --every_n 4
 
 Output: evaluate/m2/results/milestones/milestone_<timestep>/<scenario>.mp4

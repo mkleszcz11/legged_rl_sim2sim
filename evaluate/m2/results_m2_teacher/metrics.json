@@ -1,0 +1,20 @@
+{
+  "terrain_note": "No stairs environment exists in this codebase. SpotJoystickRoughTerrain rough heightfield is used as proxy for 'stairs-up'. Criterion 2 (tracking) is measured on rough terrain only.",
+  "survival_rate": 1.0,
+  "tracking_error_prefail": 0.19338269531726837,
+  "tracking_error_survived": 0.19338269531726837,
+  "curriculum_mean_level": null,
+  "curriculum_mean_level_std": null,
+  "curriculum_top_level_pct_proxy": 0.84,
+  "curriculum_max_level_mean": 7.559999942779541,
+  "curriculum_max_level_std": 3.2994544506073,
+  "tracking_error_dr_flat": 0.1502646654844284,
+  "tracking_error_nodr_flat": 0.06029682606458664,
+  "dr_tracking_ratio": 2.4920825073524298,
+  "pass_fail": {
+    "c1_survival": true,
+    "c2_tracking": true,
+    "c3_curriculum": true,
+    "c4_dr_ratio": false
+  }
+}

@@ -114,6 +114,14 @@ class GenesisAdapter:
                   f"track={row.tracking_error_mean:.3f} m/s")
         return rows
 
+    def record_scenario_video(
+        self,
+        command: np.ndarray,
+        video_path: Path,
+        seed: int,
+    ) -> None:
+        print(f"[genesis] Perspective video recording not yet supported; skipping {video_path.name}")
+
     def _run_one_episode(
         self,
         seed: int,
@@ -141,6 +149,7 @@ class GenesisAdapter:
 
         survived = True
         fall_step = _N_STEPS
+        fall_timestep = -1
         track_sum = 0.0
         height_sum = 0.0
         force_rms_sum = 0.0
@@ -161,7 +170,7 @@ class GenesisAdapter:
                 gyro = _angular_vel_body_frame(qvel, base_quat)
                 gravity = _upvector_from_quat(base_quat)
 
-                obs69 = obs_buf.build_obs_69dim(gyro, gravity, joint_angles, command)
+                obs69 = obs_buf.build_obs69(gyro, gravity, joint_angles, command)
                 obs_t = torch.from_numpy(obs69).unsqueeze(0).to(self.device)
                 action_t, hidden = self.student(obs_t, hidden)
                 action = action_t.squeeze(0).cpu().numpy()
@@ -175,6 +184,7 @@ class GenesisAdapter:
 
                 if gravity_z < _TERMINATION_GRAVITY_Z:
                     survived = False
+                    fall_timestep = t
                     fall_step = t + 1
                     break
 
@@ -198,6 +208,7 @@ class GenesisAdapter:
             base_height_dev_mean=float(height_sum / cnt),
             feet_force_rms=float(force_rms_sum / cnt),
             episode_seconds=float(fall_step * CTRL_DT),
+            fall_timestep=fall_timestep,
         )
 
 

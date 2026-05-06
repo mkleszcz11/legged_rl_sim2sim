@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import importlib
 import os
 import sys
 import time
@@ -41,8 +42,6 @@ from mujoco_playground import registry
 from mujoco_playground._src.wrapper_torch import RSLRLBraxWrapper, _jax_to_torch
 from utils.jax_oracle import load_teacher
 
-
-# ── Student model ──────────────────────────────────────────────────────────────
 
 class GRUStudent(nn.Module):
     """Proprioceptive GRU policy: proprio(69) → GRU(256) → MLP([128]) → actions(12).
@@ -85,14 +84,10 @@ class GRUStudent(nn.Module):
         return torch.zeros(1, num_envs, self.gru.hidden_size, device=device)
 
 
-# ── Observation helper ─────────────────────────────────────────────────────────
-
 def extract_proprio(state_obs: torch.Tensor) -> torch.Tensor:
     """Drop feet_pos [54:66] from the 81-dim state to produce 69-dim proprio."""
     return torch.cat([state_obs[:, :54], state_obs[:, 66:]], dim=-1)
 
-
-# ── Rollout storage ────────────────────────────────────────────────────────────
 
 @dataclass
 class RolloutStorage:
@@ -118,8 +113,6 @@ class RolloutStorage:
                 "dones":        self.dones[:, idx],         # (T, B)
             }
 
-
-# ── Rollout collection ─────────────────────────────────────────────────────────
 
 def collect_rollout(
     env: RSLRLBraxWrapper,
@@ -285,11 +278,23 @@ def save_checkpoint(student: GRUStudent, iteration: int, directory: Path) -> Non
     directory.mkdir(parents=True, exist_ok=True)
     payload = {"iteration": iteration, "model": student.state_dict()}
     torch.save(payload, directory / f"student_iter{iteration:07d}.pt")
-    torch.save(payload, directory / "student_spot_proprio.pt")
+    torch.save(payload, directory / f"{directory.name}.pt")  # rolling alias keyed by run
     print(f"  [ckpt] saved iteration {iteration:,}  →  {directory}")
 
 
 # ── Environment builder ────────────────────────────────────────────────────────
+
+def _resolve_randomization_fn(spec: str | None):
+    """Import a randomization function from a 'module:function' spec string.
+
+    Example: "mujoco_playground._src.locomotion.spot.randomize:domain_randomize"
+    Returns None when spec is None or empty.
+    """
+    if not spec:
+        return None
+    module_name, fn_name = spec.rsplit(":", 1)
+    return getattr(importlib.import_module(module_name), fn_name)
+
 
 def build_env(cfg: dict) -> RSLRLBraxWrapper:
     env_name   = cfg["env"]["name"]
@@ -297,12 +302,16 @@ def build_env(cfg: dict) -> RSLRLBraxWrapper:
     seed       = cfg["env"]["seed"]
     env_config = registry.get_default_config(env_name)
     raw_env    = registry.load(env_name, config=env_config)
+    randomization_fn = _resolve_randomization_fn(cfg["env"].get("randomization_fn"))
+    if randomization_fn is not None:
+        print(f"  Physics-DR enabled: {cfg['env']['randomization_fn']}")
     return RSLRLBraxWrapper(
         raw_env,
-        num_actors     = num_envs,
-        seed           = seed,
-        episode_length = env_config.episode_length,
-        action_repeat  = 1,
+        num_actors        = num_envs,
+        seed              = seed,
+        episode_length    = env_config.episode_length,
+        action_repeat     = 1,
+        randomization_fn  = randomization_fn,
     )
 
 

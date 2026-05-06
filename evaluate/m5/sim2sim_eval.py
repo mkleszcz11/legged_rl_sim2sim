@@ -62,6 +62,21 @@ _ALL_SIMS = ["mjx", "mujoco_cpu", "genesis"]
 _DEFAULT_RESULTS_DIR = Path(__file__).parent / "results"
 _CSV_NAME = "sim2sim_baseline.csv"
 
+# Motion scenarios for --all-perspectives (mirrors evaluate/m3/record_videos.py).
+# Each entry: (short_name, (vx_m/s, vy_m/s, wz_rad/s)).
+# "stress" (random env-sampled commands) is excluded — not meaningful with a fixed command.
+_PERSPECTIVES: list[tuple[str, tuple[float, float, float]]] = [
+    ("forward_slow",  (0.5,  0.0,  0.0)),
+    ("forward_nom",   (1.0,  0.0,  0.0)),
+    ("forward_fast",  (1.5,  0.0,  0.0)),
+    ("backward",      (-0.5, 0.0,  0.0)),
+    ("lateral_left",  (0.0,  0.5,  0.0)),
+    ("lateral_right", (0.0, -0.5,  0.0)),
+    ("rotate_left",   (0.0,  0.0,  1.0)),
+    ("rotate_right",  (0.0,  0.0, -1.0)),
+    ("curve",         (0.8,  0.0,  0.5)),
+]
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -94,6 +109,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no_video", action="store_true",
         help="Skip video recording",
+    )
+    p.add_argument(
+        "--num_videos", type=int, default=1,
+        help="Number of videos to record per simulator (uses the first N seeds)",
+    )
+    p.add_argument(
+        "--all_perspectives", action="store_true",
+        help="After metrics collection, record one video per motion scenario "
+             "(forward, backward, lateral, rotate, curve) for each simulator. "
+             "Videos are written to <results_dir>/videos/{sim}_{scenario}.mp4. "
+             "Ignored when --no_video is set.",
+    )
+    p.add_argument(
+        "--perspective_seed", type=int, default=0,
+        help="RNG seed used for all perspective videos (default: 0)",
     )
     return p.parse_args()
 
@@ -135,6 +165,20 @@ def _seeds_for(num_episodes: int) -> list[int]:
     return list(range(num_episodes))
 
 
+def _record_perspectives(adapter, video_dir: Path, seed: int) -> None:
+    """Record one video per scenario in _PERSPECTIVES using the given adapter."""
+    import numpy as np
+    print(f"\n  Recording {len(_PERSPECTIVES)} perspective videos (seed={seed}) …")
+    for scenario_name, command in _PERSPECTIVES:
+        video_path = video_dir / f"{adapter.name}_{scenario_name}.mp4"
+        print(f"  [{adapter.name}] {scenario_name}  cmd={command}")
+        adapter.record_scenario_video(
+            command=np.array(command, dtype=np.float32),
+            video_path=video_path,
+            seed=seed,
+        )
+
+
 def main() -> None:
     args = parse_args()
     results_dir = Path(args.results_dir)
@@ -162,27 +206,34 @@ def main() -> None:
         done_seeds = {seed for (sim, seed) in existing if sim == sim_name}
         missing = [s for s in all_seeds if s not in done_seeds]
 
-        if not missing:
-            print(f"  All {args.num_episodes} episodes already collected — skipping.")
-            continue
+        need_adapter = bool(missing) or (args.all_perspectives and not args.no_video)
 
-        print(f"  Collecting {len(missing)} episodes (already done: {len(done_seeds)}) …")
+        if not missing:
+            print(f"  All {args.num_episodes} episodes already collected — skipping metrics.")
+            if not need_adapter:
+                continue
 
         adapter = _load_adapter(sim_name, student, command, args.device)
         if adapter is None:
             continue
 
-        video_seed = missing[0] if not args.no_video else None
-        video_path = video_dir / f"{sim_name}.mp4" if not args.no_video else None
+        if missing:
+            print(f"  Collecting {len(missing)} episodes (already done: {len(done_seeds)}) …")
+            n_vid = args.num_videos if not args.no_video else 0
+            video_seeds = missing[:n_vid]
+            vid_dir = video_dir if video_seeds else None
 
-        rows = adapter.run_episodes(
-            seeds=missing,
-            video_seed=video_seed,
-            video_path=video_path,
-        )
+            rows = adapter.run_episodes(
+                seeds=missing,
+                video_seeds=video_seeds,
+                video_dir=vid_dir,
+            )
 
-        append_rows(csv_path, rows)
-        print(f"  Appended {len(rows)} rows to {csv_path.name}")
+            append_rows(csv_path, rows)
+            print(f"  Appended {len(rows)} rows to {csv_path.name}")
+
+        if args.all_perspectives and not args.no_video:
+            _record_perspectives(adapter, video_dir, args.perspective_seed)
 
         # Release GPU/CPU memory before loading the next backend.
         del adapter

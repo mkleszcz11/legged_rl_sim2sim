@@ -62,7 +62,7 @@ class ObsBuffer:
         self._last_act = np.zeros(12, dtype=np.float32)
         self._qpos_error_history = np.zeros(36, dtype=np.float32)
 
-    def build_obs_69dim(
+    def build_obs69(
         self,
         gyro: np.ndarray,           # (3,) angular velocity in body frame
         gravity: np.ndarray,        # (3,) upvector sensor reading
@@ -119,5 +119,17 @@ class SimAdapter(Protocol):
 
         video_seed: which seed's trajectory to record (None = no video).
         video_path: where to write the MP4 (None = no video).
+        """
+        ...
+
+    def record_scenario_video(
+        self,
+        command: np.ndarray,
+        video_path: Path,
+        seed: int,
+    ) -> None:
+        """Record one episode with the given command and save a video.
+
+        Used by --all-perspectives to capture each motion direction per sim.
         """
         ...

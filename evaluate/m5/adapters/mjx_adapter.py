@@ -55,24 +55,22 @@ class MJXAdapter:
     def run_episodes(
         self,
         seeds: list[int],
-        video_seed: int | None,
-        video_path: Path | None,
+        video_seeds: list[int],
+        video_dir: Path | None,
     ) -> list[EpisodeRow]:
         if not seeds:
             return []
 
-        want_video = (video_seed is not None and video_path is not None
-                      and not video_path.exists() and video_seed in seeds)
         print(f"[mjx] Running {len(seeds)} episodes (vmap batch) …")
-        return self._run_batch(seeds, video_seed if want_video else None, video_path)
+        return self._run_batch(seeds, video_seeds, video_dir)
 
     # ------------------------------------------------------------------
 
     def _run_batch(
         self,
         seeds: list[int],
-        video_seed: int | None,
-        video_path: Path | None,
+        video_seeds: list[int],
+        video_dir: Path | None,
     ) -> list[EpisodeRow]:
         n = len(seeds)
         cmd_jax = jp.array(self.command)
@@ -93,15 +91,23 @@ class MJXAdapter:
         force_rms_sum = np.zeros(n, dtype=np.float64)
         alive_cnt = np.zeros(n, dtype=np.int64)
 
-        # Optional inline video capture — uses mujoco.Renderer (CPU/OpenGL) so
-        # we never need a second JAX/Warp step compilation.
-        renderer = video_idx = mj_data = frames = None
-        if video_seed is not None:
-            video_idx = seeds.index(video_seed)
-            mj_model = self.env.mj_model
-            mj_data = mujoco.MjData(mj_model)
-            renderer = mujoco.Renderer(mj_model, height=480, width=640)
-            frames = []
+        # Buffer raw state per video seed during the loop; render after to avoid
+        # holding EGL/OpenGL GPU contexts alongside the vmap batch (4 GB VRAM).
+        recorders = []
+        if video_dir is not None:
+            for vs in video_seeds:
+                if vs not in seeds:
+                    continue
+                path = video_dir / f"{self.name}_{vs}.mp4"
+                if path.exists():
+                    continue
+                recorders.append({
+                    "idx": seeds.index(vs),
+                    "path": path,
+                    "qpos_buf": [],
+                    "qvel_buf": [],
+                    "ctrl_buf": [],
+                })
 
         self.student.eval()
         with torch.no_grad():
@@ -114,14 +120,12 @@ class MJXAdapter:
                 states = self.vmap_step(states, actions_jax)
                 states = states.replace(info={**states.info, "command": cmd_batch})
 
-                # Capture video frame before metrics (so we get the post-step pose).
-                if renderer is not None:
-                    mj_data.qpos[:] = np.array(states.data.qpos[video_idx])
-                    mj_data.qvel[:] = np.array(states.data.qvel[video_idx])
-                    mj_data.ctrl[:] = np.array(states.data.ctrl[video_idx])
-                    mujoco.mj_forward(self.env.mj_model, mj_data)
-                    renderer.update_scene(mj_data, camera="track")
-                    frames.append(renderer.render().copy())
+                # Buffer state snapshots for deferred video rendering.
+                for rec in recorders:
+                    idx = rec["idx"]
+                    rec["qpos_buf"].append(np.array(states.data.qpos[idx]))
+                    rec["qvel_buf"].append(np.array(states.data.qvel[idx]))
+                    rec["ctrl_buf"].append(np.array(states.data.ctrl[idx]))
 
                 # Reset hidden for fallen envs.
                 done_t = np.array(_jax_to_torch(states.done).cpu())  # (n,)
@@ -150,11 +154,26 @@ class MJXAdapter:
 
                 alive = alive & ~just_fell
 
-        if renderer is not None:
-            renderer.close()
-            video_path.parent.mkdir(parents=True, exist_ok=True)
-            mediapy.write_video(str(video_path), frames, fps=_VIDEO_FPS)
-            print(f"[mjx] Video saved: {video_path}  ({len(frames)} frames)")
+        # Render videos now that the vmap batch (JAX GPU state) is done.
+        # Opening EGL renderers after freeing the batch avoids VRAM exhaustion.
+        if recorders:
+            del states
+            mj_model = self.env.mj_model
+            for rec in recorders:
+                renderer = mujoco.Renderer(mj_model, height=480, width=640)
+                md = mujoco.MjData(mj_model)
+                frames = []
+                for qpos, qvel, ctrl in zip(rec["qpos_buf"], rec["qvel_buf"], rec["ctrl_buf"]):
+                    md.qpos[:] = qpos
+                    md.qvel[:] = qvel
+                    md.ctrl[:] = ctrl
+                    mujoco.mj_forward(mj_model, md)
+                    renderer.update_scene(md, camera="track")
+                    frames.append(renderer.render().copy())
+                renderer.close()
+                rec["path"].parent.mkdir(parents=True, exist_ok=True)
+                mediapy.write_video(str(rec["path"]), frames, fps=_VIDEO_FPS)
+                print(f"[mjx] Video saved: {rec['path']}  ({len(frames)} frames)")
 
         rows = []
         for i, seed in enumerate(seeds):
@@ -170,3 +189,59 @@ class MJXAdapter:
                 fall_timestep=int(fall_step[i] - 1) if ever_fallen[i] else -1,
             ))
         return rows
+
+    # ------------------------------------------------------------------
+
+    def record_scenario_video(
+        self,
+        command: np.ndarray,
+        video_path: Path,
+        seed: int,
+    ) -> None:
+        """Run one episode with `command` and save a video to `video_path`."""
+        if video_path.exists():
+            print(f"[mjx] Perspective video already exists: {video_path.name}")
+            return
+
+        cmd_jax = jp.array(command)
+        cmd_batch = jp.tile(cmd_jax, (1, 1))   # (1, 3)
+
+        key = jp.stack([jax.random.PRNGKey(seed)])
+        states = self.vmap_reset(key)
+        states = states.replace(info={**states.info, "command": cmd_batch})
+
+        hidden = self.student.init_hidden(1, self.device)
+        qpos_buf: list = []
+        qvel_buf: list = []
+        ctrl_buf: list = []
+
+        self.student.eval()
+        with torch.no_grad():
+            for _ in range(_N_STEPS):
+                obs81 = _jax_to_torch(states.obs["state"])
+                proprio = extract_proprio(obs81)
+                actions, hidden = self.student(proprio, hidden)
+                actions_jax = jp.clip(_torch_to_jax(actions.detach()), -1.0, 1.0)
+                states = self.vmap_step(states, actions_jax)
+                states = states.replace(info={**states.info, "command": cmd_batch})
+                qpos_buf.append(np.array(states.data.qpos[0]))
+                qvel_buf.append(np.array(states.data.qvel[0]))
+                ctrl_buf.append(np.array(states.data.ctrl[0]))
+
+        del states
+        mj_model = self.env.mj_model
+        renderer = mujoco.Renderer(mj_model, height=480, width=640)
+        md = mujoco.MjData(mj_model)
+        frames = []
+        for qpos, qvel, ctrl in zip(qpos_buf, qvel_buf, ctrl_buf):
+            md.qpos[:] = qpos
+            md.qvel[:] = qvel
+            md.ctrl[:] = ctrl
+            mujoco.mj_forward(mj_model, md)
+            renderer.update_scene(md, camera="track")
+            frames.append(renderer.render().copy())
+        renderer.close()
+
+        video_path.parent.mkdir(parents=True, exist_ok=True)
+        mediapy.write_video(str(video_path), frames, fps=_VIDEO_FPS)
+        print(f"[mjx] Perspective video: {video_path.name}  ({len(frames)} frames)")

@@ -23,14 +23,12 @@ except ImportError as e:
 import mediapy
 import numpy as np
 import torch
+from etils import epath
 
-from adapters.base import (
-    ACTION_SCALE,
-    BASE_HEIGHT_TARGET,
-    CTRL_DT,
-    DEFAULT_POSE,
-    ObsBuffer,
-)
+from mujoco_playground._src.locomotion.spot.base import get_assets
+from mujoco_playground._src.locomotion.spot import spot_constants as consts
+
+from adapters.base import BASE_HEIGHT_TARGET, CTRL_DT, ObsBuffer
 from metrics import EpisodeRow
 
 # ── Physics parameters ────────────────────────────────────────────────────────
@@ -44,13 +42,9 @@ _TERMINATION_GRAVITY_Z = 0.85  # matches joystick._get_termination()
 # Body names containing the sphere foot geoms.
 _FOOT_BODIES = ["fl_lleg", "fr_lleg", "hl_lleg", "hr_lleg"]
 
-
-def _xml_path() -> str:
-    """Absolute path to the rough-terrain scene MJCF (same file as MJX uses)."""
-    here = Path(__file__).resolve()
-    repo_root = here.parent.parent.parent.parent
-    return str(repo_root / "mujoco_playground" / "mujoco_playground" / "_src" /
-               "locomotion" / "spot" / "xmls" / "scene_mjx_feetonly_rough_terrain.xml")
+# Default PD gains from joystick.py default_config (Kp=300, Kd=1.0).
+_KP = 300.0
+_KD = 1.0
 
 
 class MuJoCoCPUAdapter:
@@ -61,9 +55,20 @@ class MuJoCoCPUAdapter:
         self.command = np.array(command, dtype=np.float32)
         self.device = device
 
-        xml = _xml_path()
-        print(f"[mujoco_cpu] Loading model from {Path(xml).name} …")
-        self._mj_model = mujoco.MjModel.from_xml_path(xml)
+        # Load via from_xml_string + assets dict, the same way SpotEnv.__init__ does.
+        # from_xml_path() fails because the MJCF meshdir is a relative path that
+        # points into mujoco_menagerie which mujoco_playground manages separately.
+        xml_path = consts.FEET_ONLY_ROUGH_TERRAIN_XML
+        xml_str = epath.Path(xml_path).read_text()
+        assets = get_assets()
+
+        print(f"[mujoco_cpu] Loading model from {Path(str(xml_path)).name} …")
+        self._mj_model = mujoco.MjModel.from_xml_string(xml_str, assets=assets)
+
+        # Match the PD controller gains used during training.
+        self._mj_model.actuator_gainprm[:, 0] = _KP
+        self._mj_model.actuator_biasprm[:, 1] = -_KP
+        self._mj_model.dof_damping[6:] = _KD
 
         # Override physics settings (intentional divergence from MJX defaults).
         self._mj_model.opt.timestep = _CPU_TIMESTEP
@@ -95,23 +100,31 @@ class MuJoCoCPUAdapter:
     def run_episodes(
         self,
         seeds: list[int],
-        video_seed: int | None,
-        video_path: Path | None,
+        video_seeds: list[int],
+        video_dir: Path | None,
     ) -> list[EpisodeRow]:
         if not seeds:
             return []
 
+        video_seeds_set = set(video_seeds)
         rows = []
         for i, seed in enumerate(seeds):
-            record_video = (seed == video_seed and video_path is not None
-                            and not video_path.exists())
-            print(f"[mujoco_cpu] Episode {i+1}/{len(seeds)} (seed={seed})", end="", flush=True)
-            row, frames = self._run_one_episode(seed, capture_frames=record_video)
-            rows.append(row)
-            print(f"  {'FELL' if not row.survived else 'ok'}  "
-                  f"track={row.tracking_error_mean:.3f} m/s")
+            video_path = None
+            if seed in video_seeds_set and video_dir is not None:
+                video_path = video_dir / f"{self.name}_{seed}.mp4"
+                if video_path.exists():
+                    video_path = None  # already recorded
 
-            if record_video and frames:
+            print(f"[mujoco_cpu] Episode {i+1}/{len(seeds)} (seed={seed})", end="", flush=True)
+            row, frames = self._run_one_episode(seed, capture_frames=video_path is not None)
+            rows.append(row)
+            if row.survived:
+                print(f"  ok  track={row.tracking_error_mean:.3f} m/s")
+            else:
+                print(f"  FELL at step {row.fall_timestep}/{_N_STEPS}  "
+                      f"track={row.tracking_error_mean:.3f} m/s")
+
+            if video_path is not None and frames:
                 _write_video(frames, video_path, fps=round(1.0 / CTRL_DT))
 
         return rows
@@ -139,6 +152,7 @@ class MuJoCoCPUAdapter:
         # Accumulators.
         survived = True
         fall_step = _N_STEPS
+        fall_timestep = -1
         track_sum = 0.0
         height_sum = 0.0
         force_rms_sum = 0.0
@@ -156,7 +170,7 @@ class MuJoCoCPUAdapter:
                 gravity = data.sensordata[self._upvector_adr: self._upvector_adr + 3].copy()
                 joint_angles = data.qpos[7:19].copy()
 
-                obs69 = obs_buf.build_obs_69dim(gyro, gravity, joint_angles, command)
+                obs69 = obs_buf.build_obs69(gyro, gravity, joint_angles, command)
                 obs_t = torch.from_numpy(obs69).unsqueeze(0).to(self.device)  # (1, 69)
                 action_t, hidden = self.student(obs_t, hidden)
                 action = action_t.squeeze(0).cpu().numpy()
@@ -174,6 +188,7 @@ class MuJoCoCPUAdapter:
                 gravity_z = data.sensordata[self._upvector_adr + 2]
                 if gravity_z < _TERMINATION_GRAVITY_Z:
                     survived = False
+                    fall_timestep = t
                     fall_step = t + 1
                     break
 
@@ -200,8 +215,29 @@ class MuJoCoCPUAdapter:
             base_height_dev_mean=float(height_sum / cnt),
             feet_force_rms=float(force_rms_sum / cnt),
             episode_seconds=float(fall_step * CTRL_DT),
+            fall_timestep=fall_timestep,
         )
         return row, frames
+
+
+    def record_scenario_video(
+        self,
+        command: np.ndarray,
+        video_path: Path,
+        seed: int,
+    ) -> None:
+        """Run one episode with `command` and save a video to `video_path`."""
+        if video_path.exists():
+            print(f"[mujoco_cpu] Perspective video already exists: {video_path.name}")
+            return
+        orig_command = self.command
+        self.command = np.asarray(command, dtype=np.float32)
+        try:
+            _, frames = self._run_one_episode(seed, capture_frames=True)
+        finally:
+            self.command = orig_command
+        if frames:
+            _write_video(frames, video_path, fps=round(1.0 / CTRL_DT))
 
 
 def _write_video(frames: list, path: Path, fps: int) -> None:

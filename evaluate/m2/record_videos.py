@@ -1,8 +1,8 @@
 """Record 10 predefined-movement videos for the M2 Spot policy.
 
 Run from repo root (unitree_go2_rl/):
-    python evaluate/m2/record_videos.py \\
-        --checkpoint_dir mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints \\
+    python evaluate/m2/record_videos.py \
+        --checkpoint_dir mujoco_playground/logs/SpotJoystickRoughTerrain-20260428-123447/checkpoints \
         --output_dir evaluate/m2/results/videos
 
 Produces 10 MP4 files demonstrating the range of the trained policy.
@@ -16,6 +16,7 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT / "mujoco_playground"))
+sys.path.insert(0, str(_REPO_ROOT / "train" / "actuator_residual"))
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("MUJOCO_GL", "egl")
 
@@ -24,8 +25,34 @@ import jax.numpy as jp
 import mediapy as media
 import mujoco
 import numpy as np
+from mujoco import mjx
+from mujoco_playground import registry
 
 from load_policy import DEFAULT_ROUGH_CKPT, load_policy
+
+# Used only when --env residual; importing lazily would also be fine, but the cost
+# is negligible and a top-level import keeps the module's dependencies explicit.
+from finetune_teacher import SpotJoystickResidualEnv, port_weights
+
+# Environment choices for --env.
+#   "original":     registered MJX env (position actuators, sim_dt=4ms, iters=1).
+#   "residual":     M4 SpotJoystickResidualEnv (torque passthrough + residual injection).
+#   "cpu_accurate": registered env with sim_dt=0.5ms and 4 solver iterations -- the
+#                   "accurate physics" reference M4's residual was trying to bridge to.
+#                   Uses the MJX backend (not literal mujoco.mj_step) but with the same
+#                   solver iterations and timestep that collect_data.py used as the CPU
+#                   ground truth, so it's a faithful proxy for sim2sim transfer.
+_ENV_ORIGINAL     = "original"
+_ENV_RESIDUAL     = "residual"
+_ENV_CPU_ACCURATE = "cpu_accurate"
+_ENV_CHOICES      = (_ENV_ORIGINAL, _ENV_RESIDUAL, _ENV_CPU_ACCURATE)
+
+_DEFAULT_RESIDUAL_CKPT = _REPO_ROOT / "checkpoints" / "actuator_residual.pt"
+
+# Match collect_data.py's CPU replay settings exactly so cpu_accurate is the same
+# physics the M4 residual was trained to bridge to.
+_CPU_TIMESTEP   = 5e-4   # 0.5 ms (vs default 4 ms)
+_CPU_ITERATIONS = 4      # vs default 1
 
 
 @dataclass
@@ -140,6 +167,68 @@ def record_scenario(env, inference_fn, scenario: Scenario, seed: int, output_pat
     return {"filename": output_path.name, "fell": fell, "frames": len(frames)}
 
 
+def _build_env(env_choice: str, residual_ckpt: Path, inject_residual: bool):
+    """Construct the env to record in.
+
+    "original":     registered SpotJoystickRoughTerrain (position actuators, MJX physics
+                    at the training settings: sim_dt=4ms, iters=1).
+    "residual":     SpotJoystickResidualEnv with the M4 env modifications applied
+                    (torque-passthrough actuators, dof_damping zeroed, explicit PD via
+                    substep_fn). When inject_residual is True the trained residual
+                    network is loaded and added to ctrl every substep -- this is the
+                    env an M4-finetuned policy was actually trained against. When
+                    inject_residual is False, residual_params stays None (no network
+                    injection) -- useful as an apples-to-apples comparison against
+                    the original env, which isolates whether failures are caused by
+                    the env modifications or by the residual itself.
+    "cpu_accurate": registered SpotJoystickRoughTerrain with the physics overridden to
+                    sim_dt=0.5ms and 4 solver iterations. Same backend (MJX) as the
+                    other modes but with the high-accuracy settings that collect_data.py
+                    treated as ground truth. Use this to test whether M2 transfers to
+                    accurate physics WITHOUT going through the residual at all.
+    """
+    if env_choice == _ENV_ORIGINAL:
+        return None  # signal: let load_policy build it from the registry
+
+    if env_choice == _ENV_RESIDUAL:
+        cfg = registry.get_default_config("SpotJoystickRoughTerrain")
+
+        if not inject_residual:
+            return SpotJoystickResidualEnv(config=cfg, residual_params=None)
+
+        if not residual_ckpt.is_file():
+            raise FileNotFoundError(
+                f"Residual checkpoint not found: {residual_ckpt}\n"
+                "Train one with train/actuator_residual/residual_network.py, "
+                "pass --residual_ckpt, or pass --no_residual to skip injection."
+            )
+        params, in_mean, in_std, out_mean, out_std = port_weights(str(residual_ckpt))
+        return SpotJoystickResidualEnv(
+            config=cfg,
+            residual_params=params,
+            in_mean=in_mean, in_std=in_std,
+            out_mean=out_mean, out_std=out_std,
+        )
+
+    if env_choice == _ENV_CPU_ACCURATE:
+        # Build the registered env with sim_dt overridden via the config (this is
+        # the supported override path; it propagates through SpotEnv.__init__).
+        # Solver iterations are NOT a config field, so we mutate the loaded mj_model
+        # afterward and re-put it through MJX. This is a one-time construction-time
+        # mutation -- the env is never re-used with different physics settings.
+        cfg = registry.get_default_config("SpotJoystickRoughTerrain")
+        env = registry.load(
+            "SpotJoystickRoughTerrain",
+            config=cfg,
+            config_overrides={"sim_dt": _CPU_TIMESTEP},
+        )
+        env._mj_model.opt.iterations = _CPU_ITERATIONS
+        env._mjx_model = mjx.put_model(env._mj_model, impl=cfg.impl)
+        return env
+
+    raise ValueError(f"Unknown --env value '{env_choice}'. Choose from {_ENV_CHOICES}.")
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Record 10 Spot M2 demonstration videos.")
     p.add_argument(
@@ -149,6 +238,23 @@ def parse_args():
     p.add_argument(
         "--output_dir", default=str(Path(__file__).parent / "results" / "videos"),
         help="Directory to write MP4 files.",
+    )
+    p.add_argument(
+        "--env", choices=_ENV_CHOICES, default=_ENV_ORIGINAL,
+        help="Environment to record in. Use 'residual' to evaluate an M4-finetuned "
+             "policy in the env it was trained against.",
+    )
+    p.add_argument(
+        "--residual_ckpt", default=str(_DEFAULT_RESIDUAL_CKPT),
+        help="Path to the trained actuator residual .pt checkpoint "
+             "(only used when --env residual without --no_residual).",
+    )
+    p.add_argument(
+        "--no_residual", action="store_true",
+        help="When --env residual: build the residual env with the actuator/damping "
+             "modifications applied but skip injecting the trained network. Use this "
+             "to test whether failures come from the env modifications themselves vs "
+             "from the residual injection.",
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
@@ -172,11 +278,22 @@ def main():
             sys.exit(1)
 
     print("=" * 64)
-    print(f"Loading policy from {args.checkpoint_dir} …")
-    env, inference_fn = load_policy(args.checkpoint_dir, "SpotJoystickRoughTerrain")
+    inject = (args.env == _ENV_RESIDUAL) and not args.no_residual
+    env_label = (
+        f"{args.env} (residual injected)" if inject
+        else f"{args.env} (no residual)" if args.env == _ENV_RESIDUAL
+        else args.env
+    )
+    print(f"Loading policy from {args.checkpoint_dir}  (env={env_label}) …")
+    prebuilt_env = _build_env(args.env, Path(args.residual_ckpt), inject_residual=inject)
+    env, inference_fn = load_policy(
+        args.checkpoint_dir,
+        env_name="SpotJoystickRoughTerrain",  # PPO hyperparam lookup key (same for both envs)
+        env=prebuilt_env,
+    )
 
-    env.mj_model.vis.headlight.ambient[:] = [0.4, 0.4, 0.4]
-    env.mj_model.vis.headlight.diffuse[:] = [0.8, 0.8, 0.8]
+    env.mj_model.vis.headlight.ambient[:] = [0.5, 0.5, 0.5]
+    env.mj_model.vis.headlight.diffuse[:] = [0.7, 0.7, 0.7]
     env.mj_model.vis.headlight.active = 1
 
     results = []
