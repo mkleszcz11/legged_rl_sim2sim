@@ -26,8 +26,7 @@ Hardware: RTX 500 Ada GPU (4 GB VRAM) - all training and evaluation locally
 #### Final video:
 Student policy running in both simulators. MJX on the left, MuJoCo CPU on the right.
 
-![Final student policy MJX vs MuJoCo CPU](readme_src/summary/comparison_full.mp4)
-
+https://github.com/user-attachments/assets/d6789c4c-e3e4-4fe8-8abc-5aaa8c5f37fe
 
 #### Teacher-Student Pipeline:
 The teacher trains with privileged terrain info (scandots), then a proprio-only student is distilled from it via DAgger - no scandots, no FK-derived feet positions, just proprioception.
@@ -36,14 +35,12 @@ The teacher trains with privileged terrain info (scandots), then a proprio-only 
   <img src="readme_src/summary/teacher_student_diagram.jpg" width="850"/>
 </div>
 
-
 #### Control Step:
 One tick of the policy: proprioceptive history flows through the encoder and actor, producing joint position targets that drive Spot's PD loop at the underlying physics rate.
 
 <div align="center">
   <img src="readme_src/summary/one_step_diagram.jpg" width="600"/>
 </div>
-
 
 #### Results:
 Survival rate across three student variants: the baseline student from M3 (no physics DR), student with actuator residual (M4), and the redistilled student from M6 (after solref randomization was added to teacher training).
@@ -77,13 +74,14 @@ The original plan was ANYmal C (ANYbotics, 50 kg, 12 DOF) - a vetted MJX MJCF al
 
 The video shows some of the rollouts. The policy converges to jumping, standing, and even some tries at walking, but never learns to actually walk.
 
-![2x2 comparison of learned locomotion behaviors](readme_src/m1/anymal_2x2.mp4)
+https://github.com/user-attachments/assets/4be9e3b7-68f5-4c51-8d3d-e926fd083630
+
 
 ### Spot flat-terrain
 
 Spot ships natively in MuJoCo Playground, so M1 was running the existing environment and confirming a stable trot.
 
-![Spot flat-terrain walking](readme_src/m1/spot_flat_terrain.mp4)
+https://github.com/user-attachments/assets/bc6bdf17-26c7-4b7f-8c5a-4520aa0687c2
 
 ---
 
@@ -128,10 +126,12 @@ python evaluate/m2/record_videos.py \
 ```
 
 The following video shows the teacher policy learning on rough terrain.
-![Spot teacher policy rough-terrain learning process](readme_src/m2/milestone_progression_spot_rough_terrain.mp4)
+
+https://github.com/user-attachments/assets/df66fb6a-d4a7-41a8-b87b-cf4b1a99f6ea
 
 The following video shows the final teacher policy walking on rough terrain.
-![Spot teacher policy rough-terrain walking](readme_src/m2/spot_teacher_2x2_rough_terrain.mp4)
+
+https://github.com/user-attachments/assets/e4d6a899-c313-4b32-9295-eef45a6d5ae8
 
 <!-- #TODO - opened PR to mujoco playground to integrate rough terrain for spot  -->
 
@@ -166,7 +166,8 @@ python evaluate/m3/eval_metrics.py \
 ```
 
 The following video shows teacher vs student side-by-side on rough terrain.
-![Spot teacher vs student policy rough-terrain walking](readme_src/m3/comparison.mp4)
+
+https://github.com/user-attachments/assets/68cd7b5f-d9ea-426b-a743-11082e91db48
 
 ---
 
@@ -205,7 +206,8 @@ python evaluate/m5/sim2sim_eval.py --num_episodes 100
 ```
 
 The following video shows the student policy in MJX vs MuJoCo CPU side-by-side on rough terrain.
-![Spot student policy MJX vs MuJoCo CPU](readme_src/m4/comparison.mp4)
+
+https://github.com/user-attachments/assets/80d79c60-ab2a-4e7a-8087-5c314061d014
 
 ---
 
